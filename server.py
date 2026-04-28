@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from backend.analyzer import analyze_documents
+from backend.analyzer import analyze_documents, refine_model_prediction
 from backend.extractor import extract_all_fields, extract_text_from_upload, ocr_available
 from backend.model_service import ModelService
 
@@ -53,6 +53,12 @@ def api_extract() -> Any:
         mime_type=uploaded_file.mimetype or "",
     )
     model_prediction = model_service.predict(extracted.text)
+    model_prediction = refine_model_prediction(
+        title=extracted.filename,
+        content=extracted.text,
+        fields=extracted.fields,
+        prediction=model_prediction,
+    )
     elapsed_ms = int((perf_counter() - started_at) * 1000)
 
     return jsonify(

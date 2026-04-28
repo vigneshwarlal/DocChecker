@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -35,6 +37,8 @@ FIELD_PATTERNS: Dict[str, List[re.Pattern[str]]] = {
     "name": [
         re.compile(r"(?:student\s*name|name of (?:the )?student|candidate name|name)\s*[:\-]\s*([^\n]{2,80})", re.IGNORECASE),
         re.compile(r"(?:^|\n)\s*name\s*[:\-]\s*([^\n]{2,80})", re.IGNORECASE),
+        re.compile(r"(?:name of the candidate)\s+([A-Z][A-Za-z\s\.\-]{2,80})", re.IGNORECASE),
+        re.compile(r"(?:this is to certify that)\s+([A-Z][A-Za-z\s\.\-]{2,80})", re.IGNORECASE),
     ],
     "dob": [
         re.compile(r"(?:date of birth|d\.?\s*o\.?\s*b\.?|born on|birth date)\s*[:\-]?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})", re.IGNORECASE),
@@ -58,6 +62,12 @@ FIELD_PATTERNS: Dict[str, List[re.Pattern[str]]] = {
     ],
     "school": [
         re.compile(r"(?:school|institution|college|school name)\s*[:\-]\s*([^\n]{4,120})", re.IGNORECASE),
+        re.compile(r"(?:schoolname)\s*[:\-]?\s*([^\n]{4,120})", re.IGNORECASE),
+        re.compile(r"(?:^|\n)\s*school\s+(?!examinations\b)(?!board\b)([A-Z0-9][A-Za-z0-9\s\.\,\-\(\)]{4,120})", re.IGNORECASE),
+    ],
+    "board": [
+        re.compile(r"((?:state|central)\s+board\s+of\s+[a-z\s]{2,40})", re.IGNORECASE),
+        re.compile(r"((?:cbse|icse|isc|tn\s*state\s*board|state board)\b[^\n]{0,20})", re.IGNORECASE),
     ],
     "standard": [
         re.compile(r"(?:standard|class|std|grade)\s*[:\-]?\s*([A-Za-z0-9\(\)\-\s]{1,24})", re.IGNORECASE),
@@ -84,6 +94,29 @@ def _normalize_document_text(value: str) -> str:
         if cleaned:
             lines.append(cleaned)
     return "\n".join(lines).strip()
+
+
+def _extract_name_fallback(text: str) -> Optional[str]:
+    if not text:
+        return None
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    anchors = ("name of the candidate", "this is to certify that", "candidate name", "name")
+    for line in lines:
+        lowered = line.lower()
+        for anchor in anchors:
+            if anchor not in lowered:
+                continue
+            idx = lowered.find(anchor)
+            tail = line[idx + len(anchor):].strip(" :-|_")
+            if not tail:
+                continue
+            # Keep only likely person-name characters and normalize spacing.
+            cleaned = re.sub(r"[^A-Za-z\s\.\-]", " ", tail)
+            cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            tokens = [token for token in cleaned.split() if token]
+            if len(tokens) >= 2:
+                return cleaned.upper()
+    return None
 
 
 def _decode_text(content: bytes) -> str:
@@ -127,12 +160,47 @@ def _extract_text_from_image(content: bytes, warnings: List[str]) -> str:
         return ""
 
     try:
+        _configure_tesseract_cmd()
         image = Image.open(BytesIO(content))
         text = pytesseract.image_to_string(image, lang="eng")
         return (text or "").strip()
     except Exception as exc:
         warnings.append(f"Image OCR failed: {exc}")
         return ""
+
+
+def _configure_tesseract_cmd() -> None:
+    if pytesseract is None:
+        return
+    configured = getattr(pytesseract.pytesseract, "tesseract_cmd", None)
+    if configured and str(configured).strip() and Path(str(configured)).exists():
+        return
+
+    from_path = shutil.which("tesseract")
+    if from_path:
+        pytesseract.pytesseract.tesseract_cmd = from_path
+        return
+
+    candidate_paths = [
+        Path("C:/Program Files/Tesseract-OCR/tesseract.exe"),
+        Path("C:/Program Files (x86)/Tesseract-OCR/tesseract.exe"),
+        Path(os.path.expandvars(r"%LOCALAPPDATA%/Programs/Tesseract-OCR/tesseract.exe")),
+    ]
+    for candidate in candidate_paths:
+        if candidate.exists():
+            pytesseract.pytesseract.tesseract_cmd = str(candidate)
+            return
+
+
+def _tesseract_engine_available() -> bool:
+    if pytesseract is None:
+        return False
+    try:
+        _configure_tesseract_cmd()
+        pytesseract.get_tesseract_version()
+        return True
+    except Exception:
+        return False
 
 
 def extract_all_fields(text: str) -> Dict[str, Any]:
@@ -156,6 +224,11 @@ def extract_all_fields(text: str) -> Dict[str, Any]:
                     break
         if extracted_value:
             fields[key] = extracted_value
+
+    if "name" not in fields:
+        fallback_name = _extract_name_fallback(text)
+        if fallback_name:
+            fields["name"] = fallback_name
 
     if "dob" in fields:
         year_match = re.search(r"((?:19|20)\d{2})", fields["dob"])
@@ -202,5 +275,5 @@ def extract_text_from_upload(filename: str, content: bytes, mime_type: str = "")
 
 
 def ocr_available() -> bool:
-    return Image is not None and pytesseract is not None
+    return Image is not None and _tesseract_engine_available()
 

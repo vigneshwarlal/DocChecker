@@ -34,5 +34,6 @@ http://127.0.0.1:8080
 - `POST /api/train` — force retraining from dataset.
 
 ## Notes
-- Image OCR requires local `pytesseract` support on the machine.
+- Image OCR requires local Tesseract OCR engine installation in addition to `pytesseract`.
+- On Windows, install Tesseract and ensure `tesseract.exe` is in `PATH`.
 - If backend is unavailable, frontend falls back to browser-side extraction/analysis.

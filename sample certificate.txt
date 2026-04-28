@@ -1,7 +1,0 @@
-community certificate
-
-Name:Vigneshwarlal B M
-DOB:13.08.2005
-mark:78
-community:BC
-city:Madurai

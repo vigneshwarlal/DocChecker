@@ -178,6 +178,42 @@ h1 { font-size: 1.65rem; font-weight: 700; letter-spacing: -0.03em; line-height:
 .num-ok       { color: var(--green); }
 .num-info     { color: var(--blue); }
 
+.identity-card {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+  margin-bottom: 1.25rem;
+}
+.identity-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 6px;
+}
+.identity-value {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.identity-note {
+  font-size: 0.82rem;
+  color: var(--text2);
+}
+.identity-match .identity-value { color: var(--green); }
+.identity-mismatch {
+  background: var(--red-bg);
+  border-color: var(--red-border);
+}
+.identity-mismatch .identity-value { color: var(--red); }
+.identity-insufficient {
+  background: var(--amber-bg);
+  border-color: var(--amber-border);
+}
+.identity-insufficient .identity-value { color: var(--amber); }
+
 /* Tabs */
 .tabs { display: flex; gap: 4px; margin-bottom: 1.5rem; background: var(--surface2); padding: 4px; border-radius: var(--radius); }
 .tab { flex: 1; padding: 0.5rem 0.75rem; background: none; border: none; border-radius: calc(var(--radius) - 2px); font-family: 'Syne', sans-serif; font-size: 0.82rem; font-weight: 500; color: var(--text2); cursor: pointer; transition: all 0.15s; white-space: nowrap; }

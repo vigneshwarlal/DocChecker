@@ -3,8 +3,20 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List
 
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 from .extractor import extract_all_fields
 from .model_service import ModelService
+
+
+KNOWN_MODEL_LABELS = {
+    "marksheet",
+    "community_certificate",
+    "income_certificate",
+    "id_document",
+    "unrelated_document",
+}
 
 
 def _normalize(value: str) -> str:
@@ -86,6 +98,59 @@ def _flag(result: Dict[str, Any], severity: str, category: str, title: str, desc
             "description": description,
         }
     )
+
+
+def refine_model_prediction(
+    title: str,
+    content: str,
+    fields: Dict[str, Any],
+    prediction: Dict[str, Any],
+) -> Dict[str, Any]:
+    label = str(prediction.get("label", "unknown") or "unknown")
+    confidence = float(prediction.get("confidence", 0.0) or 0.0)
+
+    context = _normalize(f"{title} {content[:1200]}")
+    field_keys = {key for key in fields.keys() if not key.startswith("_")}
+    field_count = len(field_keys)
+
+    keyword_rules = [
+        ("community_certificate", ("community", "caste", "nativity", "belongs to")),
+        ("marksheet", ("marksheet", "mark sheet", "higher secondary", "examination", "standard", "school")),
+        ("income_certificate", ("income", "annual income", "family income", "revenue", "tahsildar")),
+        ("id_document", ("aadhaar", "aadhar", "voter id", "passport", "driving licence", "license")),
+    ]
+    keyword_hit_label = None
+    for candidate_label, keywords in keyword_rules:
+        if any(keyword in context for keyword in keywords):
+            keyword_hit_label = candidate_label
+            break
+
+    # Field-driven document type hints from OCR extraction.
+    field_hint_label = None
+    if "income" in field_keys:
+        field_hint_label = "income_certificate"
+    elif "caste" in field_keys:
+        field_hint_label = "community_certificate"
+    elif {"school", "standard"} & field_keys:
+        field_hint_label = "marksheet"
+
+    adjusted = dict(prediction)
+    if keyword_hit_label in KNOWN_MODEL_LABELS and confidence < 1.0:
+        adjusted["label"] = keyword_hit_label
+        adjusted["confidence"] = 1.0
+        adjusted["source"] = "hybrid-keyword"
+    elif field_hint_label in KNOWN_MODEL_LABELS and confidence < 0.85:
+        adjusted["label"] = field_hint_label
+        adjusted["confidence"] = round(max(confidence, 0.95), 4)
+        adjusted["source"] = "hybrid-fields"
+    elif label == "unrelated_document" and field_count >= 3 and confidence < 0.6:
+        adjusted["label"] = field_hint_label or "marksheet"
+        adjusted["confidence"] = round(max(confidence, 0.8), 4)
+        adjusted["source"] = "hybrid-ocr-recovery"
+    else:
+        adjusted["source"] = "ml"
+
+    return adjusted
 
 
 def _compare_field(
@@ -276,13 +341,23 @@ def _check_model_predictions(docs: List[Dict[str, Any]], result: Dict[str, Any])
         label = prediction.get("label", "unknown")
         confidence = float(prediction.get("confidence", 0.0))
 
-        if label == "unrelated_document":
+        # OCR-heavy uploads can produce noisy text. Treat unrelated classification
+        # as critical only when confidence is high enough to be trustworthy.
+        if label == "unrelated_document" and confidence >= 0.6:
             _flag(
                 result,
                 "critical",
                 "Document Type Classification",
                 f"{doc['title']} does not look like a certificate",
                 f"Trained model predicted '{label}' with {round(confidence * 100)}% confidence.",
+            )
+        elif label == "unrelated_document":
+            _flag(
+                result,
+                "warning",
+                "Document Type Classification",
+                f"{doc['title']} may not look like a certificate",
+                f"Model predicted '{label}' with low confidence ({round(confidence * 100)}%), so OCR quality should be reviewed.",
             )
         elif confidence < 0.35:
             _flag(
@@ -300,6 +375,70 @@ def _check_model_predictions(docs: List[Dict[str, Any]], result: Dict[str, Any])
                 f"Model identified {doc['title']} as {label}",
                 f"Document classifier confidence: {round(confidence * 100)}%.",
             )
+
+
+def _looks_like_identity_or_institution_line(line: str) -> bool:
+    lowered = line.lower()
+    keywords = (
+        "name",
+        "candidate",
+        "father",
+        "mother",
+        "school",
+        "board",
+        "education",
+        "examination",
+        "dob",
+        "birth",
+        "vidyalaya",
+        "matric",
+        "certificate",
+    )
+    return any(token in lowered for token in keywords)
+
+
+def _ml_line_mismatch_scan(docs: List[Dict[str, Any]], result: Dict[str, Any]) -> None:
+    if len(docs) < 2:
+        return
+
+    left = docs[0]
+    right = docs[1]
+    left_lines = [ln.strip() for ln in str(left.get("content") or "").split("\n") if ln.strip()]
+    right_lines = [ln.strip() for ln in str(right.get("content") or "").split("\n") if ln.strip()]
+    left_candidates = [ln for ln in left_lines if 4 <= len(ln) <= 140 and _looks_like_identity_or_institution_line(ln)]
+    right_candidates = [ln for ln in right_lines if 4 <= len(ln) <= 140 and _looks_like_identity_or_institution_line(ln)]
+
+    if not left_candidates or not right_candidates:
+        return
+
+    corpus = left_candidates + right_candidates
+    vectorizer = TfidfVectorizer(lowercase=True, analyzer="char_wb", ngram_range=(3, 5), min_df=1)
+    matrix = vectorizer.fit_transform(corpus)
+    left_vecs = matrix[: len(left_candidates)]
+    right_vecs = matrix[len(left_candidates) :]
+    sim = cosine_similarity(left_vecs, right_vecs)
+
+    mismatch_titles: List[str] = []
+    for idx, line in enumerate(left_candidates):
+        best = float(sim[idx].max()) if sim.shape[1] else 0.0
+        if best >= 0.45:
+            continue
+        lowered = line.lower()
+        if "name" in lowered or "candidate" in lowered:
+            mismatch_titles.append("ML Identity mismatch signal (name/candidate)")
+        elif "school" in lowered:
+            mismatch_titles.append("ML institution mismatch signal (school)")
+        elif "board" in lowered or "education" in lowered:
+            mismatch_titles.append("ML institution mismatch signal (board)")
+
+    for title in sorted(set(mismatch_titles)):
+        _flag(
+            result,
+            "critical",
+            "ML Cross-Document Mismatch",
+            title,
+            f"ML text-similarity scan found low overlap between key lines in {left['title']} and {right['title']}.",
+        )
 
 
 def analyze_documents(documents: List[Dict[str, Any]], model_service: ModelService) -> Dict[str, Any]:
@@ -328,6 +467,7 @@ def analyze_documents(documents: List[Dict[str, Any]], model_service: ModelServi
             fields = extract_all_fields(content)
 
         prediction = model_service.predict(content)
+        prediction = refine_model_prediction(title, content, fields, prediction)
         fields["_predictedDocType"] = prediction["label"]
         fields["_predictionConfidence"] = prediction["confidence"]
         result["extracted_fields"][title] = fields
@@ -355,9 +495,12 @@ def analyze_documents(documents: List[Dict[str, Any]], model_service: ModelServi
         _compare_field(processed_docs, result, "father", "Father's Name", threshold=0.82)
         _compare_field(processed_docs, result, "mother", "Mother's Name", threshold=0.82)
         _compare_field(processed_docs, result, "address", "Address", threshold=0.75)
+        _compare_field(processed_docs, result, "school", "School Name", threshold=0.72)
+        _compare_field(processed_docs, result, "board", "Board of Study", threshold=0.72)
         _check_age_grade(processed_docs, result)
         _check_income_plausibility(processed_docs, result)
         _check_date_anomalies(processed_docs, result)
+        _ml_line_mismatch_scan(processed_docs, result)
         _check_model_predictions(processed_docs, result)
 
     for item in result["flags"]:

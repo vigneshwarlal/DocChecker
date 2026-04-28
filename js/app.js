@@ -51,6 +51,20 @@ async function analyzeWithBackend(documents) {
   return payload;
 }
 
+function shouldFallbackFromBackendOcr(file, backendData) {
+  const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|bmp|gif|webp|tiff?)$/i.test(file.name);
+  if (!isImage) return false;
+
+  const processing = backendData.processing || {};
+  const warnings = Array.isArray(processing.warnings) ? processing.warnings : [];
+  const warningText = warnings.join(' ').toLowerCase();
+  const text = String(backendData.text || '').toLowerCase();
+
+  if (warningText.includes('image ocr failed') || warningText.includes('tesseract')) return true;
+  if (text.includes('[no text could be extracted from this file.]')) return true;
+  return false;
+}
+
 /* ─── Slot Rendering ─── */
 function renderSlots() {
   document.querySelectorAll('.hidden-file-input').forEach(el => el.remove());
@@ -81,6 +95,8 @@ function renderSlots() {
       const fieldsPreview = filled.fields ? `<div class="fields-preview">
         ${filled.fields.name ? `<div>Name: ${esc(filled.fields.name)}</div>` : ''}
         ${filled.fields.dob ? `<div>DOB: ${esc(filled.fields.dob)}</div>` : ''}
+        ${filled.fields.board ? `<div>Board: ${esc(filled.fields.board)}</div>` : ''}
+        ${filled.fields.school ? `<div>School: ${esc(filled.fields.school)}</div>` : ''}
         ${filled.fields.father ? `<div>Father: ${esc(filled.fields.father)}</div>` : ''}
         ${filled.fields.income ? `<div>Income: ${esc(filled.fields.income)}</div>` : ''}
       </div>` : '';
@@ -220,10 +236,24 @@ async function handleFile(id, file) {
 
     try {
       const backendData = await extractWithBackend(file);
-      content = backendData.text || '';
-      fields = backendData.fields || {};
+      if (shouldFallbackFromBackendOcr(file, backendData)) {
+        content = await readImageFile(file);
+        fields = window.NLP.extractAllFields(content);
+        const backendWarnings = Array.isArray(backendData.processing?.warnings) ? backendData.processing.warnings : [];
+        processing = {
+          method: 'browser-ocr-fallback',
+          elapsed_ms: backendData.processing?.elapsed_ms || 0,
+          warnings: [
+            'Backend OCR failed; browser OCR fallback used.',
+            ...backendWarnings,
+          ],
+        };
+      } else {
+        content = backendData.text || '';
+        fields = backendData.fields || {};
+        processing = backendData.processing || null;
+      }
       modelPrediction = backendData.model_prediction || null;
-      processing = backendData.processing || null;
     } catch (backendErr) {
       console.warn('Backend extraction unavailable; using browser fallback.', backendErr);
       if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
@@ -399,6 +429,21 @@ function runAnalysis() {
 function renderResults(data) {
   const res = document.getElementById('results-section');
   const s   = data.summary || {};
+  const extractedFields = data.extracted_fields || {};
+  const identityValues = Object.values(extractedFields)
+    .map(fields => fields && fields.name ? String(fields.name).trim() : '')
+    .filter(Boolean);
+  const hasEnoughIdentityData = identityValues.length >= 2;
+  const nameComparison = (data.field_comparisons || []).find(fc => fc.field === 'Student Name');
+  let identityStatus = 'Insufficient';
+  let identityClass = 'identity-insufficient';
+  if (nameComparison) {
+    identityStatus = nameComparison.match ? 'Match' : 'Mismatch';
+    identityClass = nameComparison.match ? 'identity-match' : 'identity-mismatch';
+  } else if (hasEnoughIdentityData) {
+    identityStatus = 'Mismatch';
+    identityClass = 'identity-mismatch';
+  }
   const modelTest = data.model_test || null;
   const modelSummaryText = modelTest && typeof modelTest.test_accuracy === 'number'
     ? `Model test accuracy: ${Math.round(modelTest.test_accuracy * 100)}% on ${modelTest.test_rows || 0} validation samples.`
@@ -431,6 +476,15 @@ function renderResults(data) {
       <div class="summary-card"><div class="summary-num num-warning">${s.warning_count || 0}</div><div class="summary-label">Warnings</div></div>
       <div class="summary-card"><div class="summary-num num-ok">${s.ok_count || 0}</div><div class="summary-label">Checks passed</div></div>
       <div class="summary-card"><div class="summary-num num-info">${s.info_count || 0}</div><div class="summary-label">Info notes</div></div>
+    </div>
+    <div class="identity-card ${identityClass}">
+      <div class="identity-title">PII Identity Check</div>
+      <div class="identity-value">${identityStatus}</div>
+      <div class="identity-note">${identityStatus === 'Mismatch'
+        ? 'Name fields do not match across uploaded documents.'
+        : identityStatus === 'Match'
+          ? 'Name fields match across uploaded documents.'
+          : 'Could not compare identity because one or more documents are missing extracted name fields.'}</div>
     </div>
     <div class="tabs">
       <button class="tab active" onclick="switchTab('flags',this)">Flags &amp; Findings</button>
@@ -490,7 +544,7 @@ function renderResults(data) {
 
   /* Extract */
   html += `<div id="tab-extract" style="display:none">`;
-  const REQUIRED_FIELDS = ['name', 'dob', 'father', 'mother', 'income', 'address', 'caste', 'school', 'standard', 'yearPassing', 'certDate'];
+  const REQUIRED_FIELDS = ['name', 'dob', 'father', 'mother', 'income', 'address', 'caste', 'board', 'school', 'standard', 'yearPassing', 'certDate'];
   if (data.extracted_fields) {
     Object.entries(data.extracted_fields).forEach(([docName, fields]) => {
       const display = {};
