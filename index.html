@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Document Semantic Consistency Checker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── Header ── -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo-mark">VAV</div>
+      <div>
+        <span class="badge">AI-Powered </span>
+        <h1>Document Semantic Consistency Checker</h1>
+        <p class="header-sub">
+          Upload student certificates and marksheets. The AI engine extracts entities,
+          cross-matches fields semantically, and flags logical inconsistencies or fraud
+          indicators .
+        </p>
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Upload Section ── -->
+  <main id="upload-section">
+
+    <div class="demo-banner">
+      <div>
+        <strong>No documents? Use demo data.</strong>
+        <p>Load a pre-built scenario with intentional mismatches to see the full pipeline.</p>
+      </div>
+      <button class="demo-btn" id="demo-btn">Load demo scenario →</button>
+    </div>
+
+    <div class="section-label">Documents to analyse</div>
+    <div class="upload-grid" id="slot-grid"></div>
+    <button class="add-btn" id="add-btn">+ Add another document</button>
+
+    <!-- How it works -->
+    <div class="how-it-works">
+      <div class="how-title">How it works</div>
+      <div class="how-grid">
+        <div class="how-card">
+          <div class="how-num">01</div>
+          <div class="how-text"><strong>Entity Extraction</strong> — NLP pulls name, DOB, parent names, income, caste, school, and dates from each document.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-num">02</div>
+          <div class="how-text"><strong>Semantic Matching</strong> — Fields are compared with similarity scoring, catching even minor spelling variants and case mismatches.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-num">03</div>
+          <div class="how-text"><strong>Logical Fraud Check</strong> — AI checks age-grade consistency, income plausibility, date ordering, and cross-document coherence.</div>
+        </div>
+        <div class="how-card">
+          <div class="how-num">04</div>
+          <div class="how-text"><strong>Verdict</strong> — PASS / NEEDS REVIEW / REJECT with severity-ranked findings and a field-by-field comparison table.</div>
+        </div>
+      </div>
+    </div>
+
+    <button class="analyze-btn" id="analyze-btn" disabled>
+      <span>⚡</span> Analyse documents with AI
+    </button>
+
+  </main>
+
+  <!-- ── Results Section ── -->
+  <section id="results-section" style="display:none"></section>
+
+</div>
+
+<script src="js/demo-data.js"></script>
+<script src="js/nlp.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
