@@ -1,0 +1,42 @@
+text,label
+"TAMIL NADU STATE BOARD SECONDARY SCHOOL LEAVING CERTIFICATE student name register number date of birth school year of passing standard marks total grade",marksheet
+"HIGHER SECONDARY EXAMINATION CERTIFICATE candidate name school name district date of birth roll number month year subject marks",marksheet
+"SSLC MARK SHEET student details father name mother name school register number date of issue grade and total score",marksheet
+"STATE BOARD 10TH STANDARD PROVISIONAL CERTIFICATE student name date of birth school name result pass marksheet",marksheet
+"UNIVERSITY TRANSFER CERTIFICATE with student name admission number class year of passing and principal signature",marksheet
+"MARK SHEET for class XII board examination showing tamil english mathematics science social science and total marks",marksheet
+"SCHOOL LEAVING CERTIFICATE register number date of birth class section academic year percentage and institution name",marksheet
+"BOARD EXAM RESULT SHEET with candidate name hall ticket number school district and year of passing",marksheet
+"OFFICE OF THE REVENUE DIVISIONAL OFFICER COMMUNITY CERTIFICATE name son of resident of community sub caste issuing authority",community_certificate
+"COMMUNITY CERTIFICATE belongs to backward class certificate number date of issue taluk district state",community_certificate
+"CASTE CERTIFICATE issued by tahsildar applicant name fathers name address caste category and valid date",community_certificate
+"NATIVITY AND COMMUNITY CERTIFICATE resident address village district community details and issuing officer",community_certificate
+"REVENUE DEPARTMENT COMMUNITY STATUS CERTIFICATE applicant details caste religion and certificate number",community_certificate
+"COMMUNITY CERTIFICATE for student scholarship purpose with name date of birth community and authority seal",community_certificate
+"CERTIFICATE OF SOCIAL STATUS lists applicant name parent name community category district and issue date",community_certificate
+"DISTRICT ADMINISTRATION COMMUNITY CERTIFICATE with sub caste classification and taluk office reference",community_certificate
+"CERTIFICATE OF FAMILY INCOME tahsildar office name of head of family annual family income occupation and dependents",income_certificate
+"INCOME CERTIFICATE annual income rupees declared by applicant and verified by revenue inspector",income_certificate
+"REVENUE DEPARTMENT INCOME DECLARATION certificate number date of issue family income and address",income_certificate
+"FAMILY INCOME CERTIFICATE for educational concession includes applicant name father name and yearly income",income_certificate
+"INCOME PROOF issued by village administrative officer showing total annual earnings and residence details",income_certificate
+"LOW INCOME CERTIFICATE with amount in rupees and verification by tahsildar",income_certificate
+"HOUSEHOLD INCOME DECLARATION mentions occupation salary agriculture income and certificate issue date",income_certificate
+"INCOME CERTIFICATE FOR SCHOLARSHIP annual family income details and competent authority signature",income_certificate
+"UNIQUE IDENTIFICATION AUTHORITY OF INDIA AADHAAR CARD name date of birth gender address aadhaar number",id_document
+"GOVERNMENT OF INDIA PAN CARD permanent account number name father name date of birth",id_document
+"VOTER ID election commission identity card name age gender address",id_document
+"PASSPORT OF INDIA given name surname nationality date of birth passport number",id_document
+"DRIVING LICENCE holder name date of birth address validity transport authority",id_document
+"RATION CARD family members address card number and state food supply department",id_document
+"NATIONAL IDENTITY CARD with photograph holder name and unique identification number",id_document
+"EMPLOYEE ID CARD organization name employee code designation date of joining",id_document
+"bank account statement with transaction history debit credit opening balance closing balance",unrelated_document
+"electricity bill consumer number billing cycle units consumed due date payment details",unrelated_document
+"mobile recharge invoice transaction id paid amount gst and service description",unrelated_document
+"hospital prescription patient diagnosis medicine dosage follow up date",unrelated_document
+"restaurant receipt item quantity tax total amount payment mode",unrelated_document
+"flight ticket passenger pnr departure arrival seat number boarding gate",unrelated_document
+"internet usage report plan details bandwidth data consumption and billing period",unrelated_document
+"property rental agreement monthly rent security deposit landlord tenant terms",unrelated_document
+

@@ -1,12 +1,16 @@
 /**
  * app.js — Main application controller.
- * Uses window.NLP (nlp.js) entirely in-browser. No API key required.
+ * Primary business logic uses Python backend APIs.
+ * Browser-side NLP remains as fallback if backend is unavailable.
  */
 
 /* ─── State ─── */
 let slots    = [];
-let fileData = {};   // { slotId: { name, content, demo?, type?, status?, textFile? } }
+let fileData = {};   // { slotId: { name, content, status, textFile, fields, modelPrediction, processing } }
 const PDF_WORKER_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const BACKEND_BASE = window.location.origin && window.location.origin !== 'null'
+  ? window.location.origin
+  : 'http://127.0.0.1:8080';
 
 const DEFAULT_SLOTS = [
   { id: 'doc0', label: 'Document 1', title: 'Marksheet / TC',         sub: 'School board certificate or TC', icon: '📋' },
@@ -26,6 +30,27 @@ const DEFAULT_SLOTS = [
   }
 })();
 
+async function extractWithBackend(file) {
+  const body = new FormData();
+  body.append('file', file);
+
+  const resp = await fetch(`${BACKEND_BASE}/api/extract`, { method: 'POST', body });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(payload.error || `Backend extraction failed (${resp.status})`);
+  return payload;
+}
+
+async function analyzeWithBackend(documents) {
+  const resp = await fetch(`${BACKEND_BASE}/api/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ documents }),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(payload.error || `Backend analysis failed (${resp.status})`);
+  return payload;
+}
+
 /* ─── Slot Rendering ─── */
 function renderSlots() {
   document.querySelectorAll('.hidden-file-input').forEach(el => el.remove());
@@ -43,6 +68,15 @@ function renderSlots() {
         : filled.status === 'error'
           ? 'Upload failed'
           : '';
+      const modelSummary = filled.modelPrediction
+        ? `<div class="slot-status">Model: ${esc(filled.modelPrediction.label || 'unknown')} (${Math.round((filled.modelPrediction.confidence || 0) * 100)}%)</div>`
+        : '';
+      const processingSummary = filled.processing && typeof filled.processing.elapsed_ms === 'number'
+        ? `<div class="slot-status">Processed in ${filled.processing.elapsed_ms} ms (${esc(filled.processing.method || 'unknown')})</div>`
+        : '';
+      const processingWarning = filled.processing && Array.isArray(filled.processing.warnings) && filled.processing.warnings.length
+        ? `<div class="slot-status">${esc(filled.processing.warnings[0])}</div>`
+        : '';
       const downloadBtn = filled.status === 'ready' ? `<button class="download-btn" data-id="${slot.id}" aria-label="Download extracted text">📄 Download .txt</button>` : '';
       const fieldsPreview = filled.fields ? `<div class="fields-preview">
         ${filled.fields.name ? `<div>Name: ${esc(filled.fields.name)}</div>` : ''}
@@ -56,6 +90,9 @@ function renderSlots() {
         <div class="slot-title">${slot.title}</div>
         <div class="slot-filename">${esc(filled.name)}</div>
         ${fieldsPreview}
+        ${modelSummary}
+        ${processingSummary}
+        ${processingWarning}
         ${statusText ? `<div class="slot-status">${statusText}</div>` : ''}
         ${downloadBtn}
         <button class="slot-remove" data-id="${slot.id}" aria-label="Remove">✕</button>
@@ -113,6 +150,7 @@ function triggerUpload(id) {
   if (el) el.click();
 }
 
+/* Browser fallback extraction */
 async function readPdfFile(file) {
   if (!window.pdfjsLib) throw new Error('PDF.js is not loaded');
   const arrayBuffer = await file.arrayBuffer();
@@ -171,23 +209,50 @@ async function readImageFile(file) {
 
 async function handleFile(id, file) {
   if (!file) return;
-  const slot = slots.find(s => s.id === id) || {};
   fileData[id] = { name: file.name, content: '', status: 'loading' };
   renderSlots();
 
   try {
     let content = '';
-    if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
-      content = await file.text();
-    } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-      content = await readPdfFile(file);
-    } else if (file.type.startsWith('image/') || /\.(jpe?g|png|bmp|gif|webp)$/i.test(file.name)) {
-      content = await readImageFile(file);
-    } else {
-      content = `Document: ${file.name}\n[Unsupported file type. Please upload a .txt, .pdf, or image file.]`;
+    let fields = {};
+    let modelPrediction = null;
+    let processing = null;
+
+    try {
+      const backendData = await extractWithBackend(file);
+      content = backendData.text || '';
+      fields = backendData.fields || {};
+      modelPrediction = backendData.model_prediction || null;
+      processing = backendData.processing || null;
+    } catch (backendErr) {
+      console.warn('Backend extraction unavailable; using browser fallback.', backendErr);
+      if (file.type === 'text/plain' || file.name.toLowerCase().endsWith('.txt')) {
+        content = await file.text();
+      } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        content = await readPdfFile(file);
+      } else if (file.type.startsWith('image/') || /\.(jpe?g|png|bmp|gif|webp)$/i.test(file.name)) {
+        content = await readImageFile(file);
+      } else {
+        content = `Document: ${file.name}\n[Unsupported file type. Please upload a .txt, .pdf, or image file.]`;
+      }
+      fields = window.NLP.extractAllFields(content);
+      processing = {
+        method: 'browser-fallback',
+        elapsed_ms: 0,
+        warnings: [`Backend not reachable: ${backendErr.message}`]
+      };
     }
 
-    fileData[id] = { name: file.name, content, type: file.type || 'unknown', status: 'ready', textFile: new File([content], file.name.replace(/\.[^.]+$/, '.txt'), { type: 'text/plain' }), fields: window.NLP.extractAllFields(content) };
+    fileData[id] = {
+      name: file.name,
+      content,
+      type: file.type || 'unknown',
+      status: 'ready',
+      textFile: new File([content], file.name.replace(/\.[^.]+$/, '.txt'), { type: 'text/plain' }),
+      fields,
+      modelPrediction,
+      processing,
+    };
   } catch (err) {
     fileData[id] = {
       name: file.name,
@@ -252,16 +317,15 @@ function runAnalysis() {
   const res = document.getElementById('results-section');
   res.style.display = 'block';
 
-  // Animated loading
   const loadingSteps = [
-    'Extracting named entities…',
-    'Running Levenshtein distance matching…',
-    'Comparing date of birth fields…',
-    'Checking income plausibility…',
-    'Running age-grade consistency check…',
-    'Scanning for date anomalies…',
-    'Computing semantic similarity scores…',
-    'Assembling consistency report…',
+    'Extracting text from uploaded certificates…',
+    'Pulling entities using backend parser…',
+    'Training certificate model on local dataset…',
+    'Testing trained model against validation split…',
+    'Running semantic field consistency checks…',
+    'Evaluating DOB / income / date anomalies…',
+    'Scoring confidence and preparing report…',
+    'Finalizing output for UI…',
   ];
   let stepIdx = 0;
   let progress = 0;
@@ -270,7 +334,7 @@ function runAnalysis() {
     <div class="loading-wrap">
       <div class="loading-spinner"></div>
       <h2>Analysing documents…</h2>
-      <p>Running NLP consistency checks in your browser — no data leaves your device.</p>
+      <p>Processing extraction and model checks through Python backend.</p>
       <div class="loading-step" id="loading-step">${loadingSteps[0]}</div>
       <div class="progress-bar-wrap"><div class="progress-bar" id="prog-bar" style="width:5%"></div></div>
     </div>`;
@@ -284,7 +348,6 @@ function runAnalysis() {
     if (pb) pb.style.width = progress + '%';
   }, 300);
 
-  // Run analysis in next tick so loading renders first
   setTimeout(async () => {
     clearInterval(stepTimer);
     const pb = document.getElementById('prog-bar');
@@ -295,19 +358,36 @@ function runAnalysis() {
       for (const k of keys) {
         const d = fileData[k];
         const slot = slots.find(s => s.id === k) || { title: 'Document' };
-        // Read content from the text file
         const content = await d.textFile.text();
-        const fields = window.NLP.extractAllFields(content);
-        documents.push({ title: slot.title, content, fields });
+        documents.push({ title: slot.title, content, fields: d.fields || {} });
       }
 
-      const result = window.NLP.analyzeDocuments(documents);
+      let result;
+      try {
+        result = await analyzeWithBackend(documents);
+      } catch (backendErr) {
+        console.warn('Backend analysis unavailable; using browser fallback.', backendErr);
+        result = window.NLP.analyzeDocuments(documents.map(doc => ({
+          title: doc.title,
+          content: doc.content,
+          fields: doc.fields && Object.keys(doc.fields).length ? doc.fields : window.NLP.extractAllFields(doc.content),
+        })));
+        result.flags = [
+          {
+            severity: 'warning',
+            category: 'Backend Availability',
+            title: 'Python backend unavailable; browser fallback used',
+            description: backendErr.message,
+          },
+          ...(result.flags || [])
+        ];
+      }
       setTimeout(() => renderResults(result), 200);
     } catch (err) {
       res.innerHTML = `
         <div class="error-card">
           <strong>Analysis failed</strong>
-          <p>An unexpected error occurred during NLP processing.</p>
+          <p>An unexpected error occurred during processing.</p>
           <p style="margin-top:6px;font-family:monospace;font-size:11px;opacity:0.7">${esc(err.message)}</p>
         </div>
         <button class="analyze-btn mt-1" onclick="resetApp()">← Try again</button>`;
@@ -319,6 +399,10 @@ function runAnalysis() {
 function renderResults(data) {
   const res = document.getElementById('results-section');
   const s   = data.summary || {};
+  const modelTest = data.model_test || null;
+  const modelSummaryText = modelTest && typeof modelTest.test_accuracy === 'number'
+    ? `Model test accuracy: ${Math.round(modelTest.test_accuracy * 100)}% on ${modelTest.test_rows || 0} validation samples.`
+    : '';
 
   const verdictClass = s.verdict === 'PASS' ? 'verdict-pass'
                      : s.verdict === 'NEEDS_REVIEW' ? 'verdict-review'
@@ -330,26 +414,24 @@ function renderResults(data) {
 
   let html = `
     <div class="results-top">
-      <div><span class="badge">Analysis Complete · Local NLP</span><h2>Consistency Report</h2></div>
+      <div><span class="badge">Analysis Complete · Python + ML</span><h2>Consistency Report</h2></div>
       <button class="back-btn" onclick="resetApp()">← New Analysis</button>
     </div>
-
     <div class="verdict-banner ${verdictClass}">
       <span class="verdict-icon">${verdictIcon}</span>
       <div>
         <div class="verdict-label">${(s.verdict || '').replace('_', ' ')}</div>
         <div class="verdict-title">${verdictTitle}</div>
         <div class="verdict-reason">${esc(s.verdict_reason || '')}</div>
+        ${modelSummaryText ? `<div class="verdict-reason">${esc(modelSummaryText)}</div>` : ''}
       </div>
     </div>
-
     <div class="summary-grid">
       <div class="summary-card"><div class="summary-num num-critical">${s.critical_count || 0}</div><div class="summary-label">Critical flags</div></div>
       <div class="summary-card"><div class="summary-num num-warning">${s.warning_count || 0}</div><div class="summary-label">Warnings</div></div>
       <div class="summary-card"><div class="summary-num num-ok">${s.ok_count || 0}</div><div class="summary-label">Checks passed</div></div>
       <div class="summary-card"><div class="summary-num num-info">${s.info_count || 0}</div><div class="summary-label">Info notes</div></div>
     </div>
-
     <div class="tabs">
       <button class="tab active" onclick="switchTab('flags',this)">Flags &amp; Findings</button>
       <button class="tab"        onclick="switchTab('compare',this)">Field Comparison</button>
@@ -402,7 +484,7 @@ function renderResults(data) {
     });
     html += `</tbody></table></div>`;
   } else {
-    html += `<p style="color:var(--text2);font-size:0.9rem;padding:0.75rem 0">Insufficient fields found for comparison. Try using .txt files with clearly labelled fields.</p>`;
+    html += `<p style="color:var(--text2);font-size:0.9rem;padding:0.75rem 0">Insufficient fields found for comparison. Try using clearer certificate text.</p>`;
   }
   html += `</div>`;
 
@@ -412,8 +494,10 @@ function renderResults(data) {
   if (data.extracted_fields) {
     Object.entries(data.extracted_fields).forEach(([docName, fields]) => {
       const display = {};
-      Object.entries(fields).forEach(([k, v]) => {
+      Object.entries(fields || {}).forEach(([k, v]) => {
         if (!k.startsWith('_') && REQUIRED_FIELDS.includes(k)) display[k] = v;
+        if (k === '_predictedDocType') display.modelDocType = v;
+        if (k === '_predictionConfidence') display.modelConfidence = `${Math.round(Number(v || 0) * 100)}%`;
       });
       html += `<div class="extract-card">
         <div class="extract-card-title">${esc(docName)}</div>

@@ -1,98 +1,38 @@
 # Document Semantic Consistency Checker
-### 100% Local — No API Key Required
+Python-backed extraction and ML analysis for uploaded certificates.
 
-This application runs entirely in your browser. No data is sent to any server.
-No API key, no account, no internet connection needed after the page loads.
+## What changed
+- Upload extraction now runs through a Python backend (`/api/extract`).
+- A text classifier is trained from `data/certificate_training_data.csv`.
+- Analysis runs in Python (`/api/analyze`) and sends verdict + flags to the same UI.
+- Existing UI layout is unchanged.
 
----
-
-## How to Run
-
-**Option A — Just open the file (simplest):**
-Double-click `index.html` in your file manager or drag it into any browser.
-
-**Option B — Local server (recommended for production use):**
+## Run locally
+1) Install dependencies:
 ```bash
-cd doc-checker
-python3 -m http.server 8080
-# Open http://localhost:8080
+python -m pip install -r requirements.txt
+```
+2) Start the app:
+```bash
+python server.py
+```
+3) Open:
+```bash
+http://127.0.0.1:8080
 ```
 
-That's it. No installation, no npm, no build step.
+## Backend pipeline
+- File text extraction from `.txt`, `.pdf`, and image uploads.
+- Regex-based field extraction for name, DOB, parents, income, address, caste, school, class, passing year, and issue date.
+- ML model training/testing using scikit-learn (TF-IDF + Logistic Regression).
+- Cross-document semantic consistency checks with scoring and anomaly flags.
 
----
+## API endpoints
+- `GET /api/health` — backend + model status.
+- `POST /api/extract` — upload one file, return extracted text/fields/model prediction.
+- `POST /api/analyze` — submit documents array, return final report used by UI.
+- `POST /api/train` — force retraining from dataset.
 
-## How It Works (No API Key Needed)
-
-The NLP engine (`js/nlp.js`) runs 100% in the browser using:
-
-| Technique | What it does |
-|---|---|
-| **Regex entity extraction** | Pulls name, DOB, father name, mother name, income, address, caste, school, standard, certificate dates from document text |
-| **Levenshtein distance** | Measures character-level edit distance between field values |
-| **Token-set (Jaccard) similarity** | Handles reordered names like "RAMESH KUMAR" vs "KUMAR RAMESH" |
-| **Age-grade logic** | Calculates student age from DOB, checks against expected range for stated class |
-| **Income plausibility** | Flags low-income declarations that coexist with asset/lifestyle keywords |
-| **Date anomaly detection** | Catches certificate dates before birth year, future dates, retroactive issues |
-
----
-
-## Best Results — Use .txt Files
-
-The app reads document content as text. For best extraction accuracy:
-
-1. **PDFs** — Open in any PDF reader → File → Save as Text (.txt) → Upload the .txt
-2. **Images** — Use a free OCR tool like [ocr.space](https://ocr.space) or Google Docs → copy text → save as .txt
-3. **Demo** — Click "Load demo scenario" to instantly see a full analysis with 4 pre-built documents
-
----
-
-## Supported Field Extraction
-
-Automatically detects and extracts:
-- Student name
-- Date of Birth
-- Father's name / Mother's name
-- Address / Residential details
-- Annual family income
-- Community / Caste
-- School / Institution name
-- Standard / Class
-- Year of passing
-- Certificate issue date
-
----
-
-## File Structure
-
-```
-doc-checker/
-├── index.html          ← App shell
-├── css/
-│   └── style.css       ← Full styles (auto dark mode)
-├── js/
-│   ├── nlp.js          ← Entire NLP engine (Levenshtein, entity extraction, fraud checks)
-│   ├── demo-data.js    ← Pre-built 4-document demo scenario
-│   └── app.js          ← UI controller
-└── README.md
-```
-
----
-
-## Privacy
-
-All processing happens locally in your browser.
-No documents, no extracted fields, no results are ever sent anywhere.
-
----
-
-## Fraud Detection Checks
-
-| Check | Trigger |
-|---|---|
-| Name mismatch | Similarity < 82% across documents |
-| DOB mismatch | Any difference in DOB across documents |
-| Age-grade inconsistency | Student age outside expected range for stated class |
-| Income vs assets | Low income + vehicle/property ownership keywords |
-| Certificate date anomaly | Issue date before birth year, or future-dated certificate |
-| Father's name mismatch | Similarity < 82% (catches spelling variants like KRISHNAMURTHY vs KRISHNAMURTY) |
+## Notes
+- Image OCR requires local `pytesseract` support on the machine.
+- If backend is unavailable, frontend falls back to browser-side extraction/analysis.
